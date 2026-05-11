@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 가상환경
+cell_traffic_optimizer/.venv/
+
+# DB 파일
+events.db
+events.db-wal
+events.db-shm
+
+# 시뮬레이터 출력
+sim_output/
+
+# 프론트엔드
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

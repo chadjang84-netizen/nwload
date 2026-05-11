@@ -1,0 +1,39 @@
+degraded_ratio: 0.5
+max_onvif_retries: 3
+recovery_cooldown_seconds: 60
+sliding_window_seconds: 60
+step_up_interval_seconds: 60
+step_up_ratio: 0.75
+supported_message_type: 1
+supported_version: 1
+thresholds:
+- band: 1
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
+- band: 3
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
+- band: 5
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
+- band: 7
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
+- band: 8
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
+- band: 78
+  congestion: 10
+  overload_enter: 15
+  overload_exit: 13
+  warning: 8
