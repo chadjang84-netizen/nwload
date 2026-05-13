@@ -1,4 +1,7 @@
+[build]
+buildCommand = "pip install --upgrade pip && pip install -r requirements.txt"
+
 [deploy]
-startCommand = "/app/.venv/bin/python -m uvicorn cell_traffic_optimizer.server.app:app --host 0.0.0.0 --port $PORT --app-dir /app/src"
+startCommand = "python -m uvicorn cell_traffic_optimizer.server.app:app --host 0.0.0.0 --port $PORT --app-dir /app/src"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
