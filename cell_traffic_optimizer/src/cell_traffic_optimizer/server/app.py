@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 UDP_HOST = "0.0.0.0"
 UDP_PORT = 9000
+UDP_ENABLED = os.getenv("UDP_ENABLED", "true").lower() in ("true", "1", "yes")
 
 
 class _UDPProtocol(asyncio.DatagramProtocol):
@@ -174,28 +176,38 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error("Recovery timer error: %s", e)
 
-    # UDP 서버 시작
-    loop = asyncio.get_event_loop()
-    transport, _ = await loop.create_datagram_endpoint(
-        lambda: _UDPProtocol(state),
-        local_addr=(UDP_HOST, UDP_PORT),
-    )
-    logger.info("UDP listener started on %s:%d", UDP_HOST, UDP_PORT)
+    # UDP 서버 시작 (UDP_ENABLED=false면 건너뜀 — Railway 등 UDP 미지원 환경용)
+    transport = None
+    if UDP_ENABLED:
+        try:
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                lambda: _UDPProtocol(state),
+                local_addr=(UDP_HOST, UDP_PORT),
+            )
+            logger.info("UDP listener started on %s:%d", UDP_HOST, UDP_PORT)
+        except Exception as e:
+            logger.warning("UDP listener disabled (bind failed): %s", e)
+            transport = None
+    else:
+        logger.info("UDP listener disabled (UDP_ENABLED=false)")
 
     task = asyncio.create_task(recovery_loop())
-    logger.info("Cell Traffic Optimizer API started (HTTP :8000, UDP :%d)", UDP_PORT)
+    logger.info("Cell Traffic Optimizer API started (HTTP, UDP=%s)", "on" if transport else "off")
     yield
     task.cancel()
-    transport.close()
-    logger.info("UDP listener stopped")
+    if transport is not None:
+        transport.close()
+        logger.info("UDP listener stopped")
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Cell Traffic Optimizer", version="0.1.0", lifespan=lifespan)
 
+    allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[o.strip() for o in allowed_origins],
         allow_methods=["*"],
         allow_headers=["*"],
     )
