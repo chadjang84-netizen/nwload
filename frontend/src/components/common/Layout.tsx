@@ -5,7 +5,9 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAlertStore } from '@/store/alertStore'
 import { AlertFeed } from '@/components/alerts/AlertFeed'
 
-const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/events`
+const WS_URL =
+  import.meta.env.VITE_WS_URL ??
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/events`
 
 const NAV_ITEMS = [
   { to: '/',        label: 'Dashboard',      Icon: LayoutDashboard },
