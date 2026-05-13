@@ -59,7 +59,7 @@ export function CellStateDonut({ cells }: Props) {
                 </Pie>
                 <Tooltip
                   contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12 }}
-                  formatter={(v: number, _: unknown, props: { payload?: { label?: string } }) => [v, props.payload?.label ?? '']}
+                  formatter={((v: unknown, _: unknown, props: { payload?: { label?: string } }) => [v as number, props.payload?.label ?? '']) as never}
                 />
               </PieChart>
             </ResponsiveContainer>

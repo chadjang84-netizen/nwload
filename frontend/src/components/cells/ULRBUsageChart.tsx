@@ -68,7 +68,7 @@ export function ULRBUsageChart({ cells }: { cells: CellStatus[] }) {
             }}
             labelStyle={{ color: '#64748b' }}
             itemStyle={{ color: '#2563eb' }}
-            formatter={(v: number) => [v.toLocaleString(), 'UL_RB_Usage']}
+            formatter={((v: unknown) => [(v as number).toLocaleString(), 'UL_RB_Usage']) as never}
           />
           <Area
             type="monotone"
