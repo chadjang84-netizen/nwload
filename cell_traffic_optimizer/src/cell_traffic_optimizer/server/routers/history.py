@@ -3,30 +3,23 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from ..deps import get_state
 from ..state import AppState
-from ..schemas import DeviceHistoryItemSchema, CellHistoryItemSchema
+from ..schemas import CellHistoryItemSchema
 
 router = APIRouter(prefix="/api/history", tags=["history"])
 
 
-@router.get("/devices", response_model=list[DeviceHistoryItemSchema])
+@router.get("/devices")
 def get_device_history(
     ctn: Optional[str] = Query(None),
     from_: Optional[str] = Query(None, alias="from"),
     to: Optional[str] = Query(None),
     state: AppState = Depends(get_state),
 ):
-    rows = state.event_store.query_device_history(
+    return state.event_store.query_device_history(
         ctn=ctn or None,
         from_ts=from_ or None,
         to_ts=to or None,
     )
-    result = []
-    for r in rows:
-        try:
-            result.append(DeviceHistoryItemSchema(**r))
-        except Exception:
-            pass
-    return result
 
 
 @router.get("/cells", response_model=list[CellHistoryItemSchema])
