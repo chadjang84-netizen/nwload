@@ -88,6 +88,8 @@ export interface Configuration {
 }
 
 // ── 카메라/매핑 ───────────────────────────────────────────────────────────────
+export type VideoCodec = 'H264' | 'H265'
+
 export interface CameraEntry {
   cameraId: string
   ipAddress: string
@@ -95,6 +97,9 @@ export interface CameraEntry {
   username: string
   profileToken: string
   isReachable: boolean
+  useTls: boolean
+  mediaServicePath: string
+  videoCodec: VideoCodec
 }
 
 export interface MappingEntry {

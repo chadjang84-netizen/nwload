@@ -1,5 +1,16 @@
 import api from './client'
-import type { CameraEntry, MappingEntry, CameraCommandLog } from '@/types'
+import type { CameraEntry, MappingEntry, CameraCommandLog, VideoCodec } from '@/types'
+
+export interface UpdateCameraPayload {
+  ipAddress: string
+  onvifPort: number
+  username: string
+  password?: string
+  profileToken: string
+  useTls?: boolean
+  mediaServicePath?: string
+  videoCodec?: VideoCodec
+}
 
 export const fetchCameras = () =>
   api.get<CameraEntry[]>('/cameras').then((r) => r.data)
@@ -7,7 +18,7 @@ export const fetchCameras = () =>
 export const createCamera = (data: Omit<CameraEntry, 'isReachable'> & { password: string }) =>
   api.post<CameraEntry>('/cameras', data).then((r) => r.data)
 
-export const updateCamera = (cameraId: string, data: { ipAddress: string; onvifPort: number; username: string; password?: string; profileToken: string }) =>
+export const updateCamera = (cameraId: string, data: UpdateCameraPayload) =>
   api.put<CameraEntry>(`/cameras/${cameraId}`, data).then((r) => r.data)
 
 export const deleteCamera = (cameraId: string) =>

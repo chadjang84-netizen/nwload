@@ -20,6 +20,9 @@ class CameraRegistry:
         username: str,
         password: str,
         profile_token: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+        video_codec: str = "H264",
     ) -> CameraRegistryEntry:
         encrypted = self._fernet.encrypt(password.encode())
         entry = CameraRegistryEntry(
@@ -30,6 +33,9 @@ class CameraRegistry:
             encrypted_password=encrypted,
             profile_token=profile_token,
             is_reachable=True,
+            use_tls=use_tls,
+            media_service_path=media_service_path,
+            video_codec=video_codec,
         )
         self._registry[camera_id] = entry
         return entry
@@ -60,6 +66,9 @@ class CameraRegistry:
         username: str,
         password: Optional[str],
         profile_token: str,
+        use_tls: Optional[bool] = None,
+        media_service_path: Optional[str] = None,
+        video_codec: Optional[str] = None,
     ) -> Optional[CameraRegistryEntry]:
         entry = self._registry.get(camera_id)
         if entry is None:
@@ -71,6 +80,12 @@ class CameraRegistry:
             entry.encrypted_password = self._fernet.encrypt(password.encode())
         entry.profile_token = profile_token
         entry.is_reachable = True
+        if use_tls is not None:
+            entry.use_tls = use_tls
+        if media_service_path is not None:
+            entry.media_service_path = media_service_path
+        if video_codec is not None:
+            entry.video_codec = video_codec
         return entry
 
     def remove(self, camera_id: str) -> bool:

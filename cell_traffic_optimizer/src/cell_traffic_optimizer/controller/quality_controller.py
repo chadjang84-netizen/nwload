@@ -20,6 +20,8 @@ class ONVIFClient(Protocol):
         username: str,
         password: str,
         profile_token: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
     ) -> dict:
         """Return dict with keys: bitrate (int), framerate (int), resolution (tuple)."""
         ...
@@ -34,6 +36,9 @@ class ONVIFClient(Protocol):
         bitrate: int,
         framerate: int,
         resolution: tuple,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+        video_codec: str = "H264",
     ) -> bool:
         ...
 
@@ -153,6 +158,8 @@ class QualityController:
                 username=entry.username,
                 password=password,
                 profile_token=entry.profile_token,
+                use_tls=getattr(entry, "use_tls", False),
+                media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
             )
             self._default_configs[camera_id] = {
                 "bitrate":    config["bitrate"],
@@ -217,6 +224,9 @@ class QualityController:
                     bitrate=bitrate,
                     framerate=framerate,
                     resolution=resolution,
+                    use_tls=getattr(entry, "use_tls", False),
+                    media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
+                    video_codec=getattr(entry, "video_codec", "H264"),
                 )
                 if ok:
                     logger.info("Camera %s SET %s %dbps (attempt %d)", camera_id, profile_name, bitrate, attempt)

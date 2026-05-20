@@ -87,8 +87,11 @@ class OnvifClient:
         username: str,
         password: str,
         profile_token: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
     ) -> dict:
-        url = f"http://{ip}:{port}/onvif/media"
+        scheme = "https" if use_tls else "http"
+        url = f"{scheme}://{ip}:{port}{media_service_path}"
         wsse = _wsse_header(username, password)
         body = f"""<trt:GetVideoEncoderConfiguration>
   <trt:ConfigurationToken>{profile_token}</trt:ConfigurationToken>
@@ -115,17 +118,36 @@ class OnvifClient:
         bitrate: int,
         framerate: int,
         resolution: tuple,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+        video_codec: str = "H264",
     ) -> bool:
-        url = f"http://{ip}:{port}/onvif/media"
+        scheme = "https" if use_tls else "http"
+        url = f"{scheme}://{ip}:{port}{media_service_path}"
         wsse = _wsse_header(username, password)
         width, height = resolution
         bitrate_kbps = max(1, bitrate // 1000)
+
+        # codec별 sub-element 분기
+        codec_norm = (video_codec or "H264").upper().replace(".", "")
+        if codec_norm == "H265":
+            encoding_tag = "H265"
+            codec_block = """    <tt:H265>
+      <tt:GovLength>30</tt:GovLength>
+      <tt:H265Profile>Main</tt:H265Profile>
+    </tt:H265>"""
+        else:
+            encoding_tag = "H264"
+            codec_block = """    <tt:H264>
+      <tt:GovLength>30</tt:GovLength>
+      <tt:H264Profile>Main</tt:H264Profile>
+    </tt:H264>"""
 
         body = f"""<trt:SetVideoEncoderConfiguration>
   <trt:Configuration token="{profile_token}">
     <tt:Name>{profile_token}</tt:Name>
     <tt:UseCount>1</tt:UseCount>
-    <tt:Encoding>H264</tt:Encoding>
+    <tt:Encoding>{encoding_tag}</tt:Encoding>
     <tt:Resolution>
       <tt:Width>{width}</tt:Width>
       <tt:Height>{height}</tt:Height>
@@ -133,10 +155,7 @@ class OnvifClient:
     <tt:FrameRateLimit>{framerate}</tt:FrameRateLimit>
     <tt:EncodingInterval>1</tt:EncodingInterval>
     <tt:BitrateLimit>{bitrate_kbps}</tt:BitrateLimit>
-    <tt:H264>
-      <tt:GovLength>30</tt:GovLength>
-      <tt:H264Profile>Main</tt:H264Profile>
-    </tt:H264>
+{codec_block}
     <tt:Multicast>
       <tt:Address>
         <tt:Type>IPv4</tt:Type>

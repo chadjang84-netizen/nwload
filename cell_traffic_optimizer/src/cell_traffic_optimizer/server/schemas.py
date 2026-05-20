@@ -105,6 +105,10 @@ class CameraEntrySchema(BaseModel):
     username: str
     profileToken: str
     isReachable: bool
+    # ONVIF endpoint 커스터마이즈 (default 적용 가능)
+    useTls: bool = False
+    mediaServicePath: str = "/onvif/media"
+    videoCodec: str = "H264"
 
 
 class CreateCameraRequest(BaseModel):
@@ -114,6 +118,9 @@ class CreateCameraRequest(BaseModel):
     username: str
     password: str
     profileToken: str
+    useTls: bool = False
+    mediaServicePath: str = "/onvif/media"
+    videoCodec: str = "H264"
 
 
 class UpdateCameraRequest(BaseModel):
@@ -122,6 +129,9 @@ class UpdateCameraRequest(BaseModel):
     username: str
     password: Optional[str] = None   # None이면 기존 비밀번호 유지
     profileToken: str
+    useTls: Optional[bool] = None              # None이면 기존값 유지
+    mediaServicePath: Optional[str] = None     # None이면 기존값 유지
+    videoCodec: Optional[str] = None           # None이면 기존값 유지
 
 
 # ── ONVIF 커맨드 이력 ────────────────────────────────────────────────────────

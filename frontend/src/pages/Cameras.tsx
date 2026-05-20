@@ -48,11 +48,27 @@ function Card({ title, action, children }: { title: string; action?: React.React
 
 // ── 카메라 레지스트리 ─────────────────────────────────────────────────────────
 
+const DEFAULT_FORM: {
+  cameraId: string; ipAddress: string; onvifPort: number; username: string;
+  password: string; profileToken: string; useTls: boolean; mediaServicePath: string;
+  videoCodec: 'H264' | 'H265';
+} = {
+  cameraId: '',
+  ipAddress: '',
+  onvifPort: 80,
+  username: '',
+  password: '',
+  profileToken: '',
+  useTls: false,
+  mediaServicePath: '/onvif/media',
+  videoCodec: 'H264',
+}
+
 function CameraRegistry() {
   const qc = useQueryClient()
   const { data: cameras = [], isFetching } = useQuery({ queryKey: ['cameras'], queryFn: fetchCameras })
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ cameraId: '', ipAddress: '', onvifPort: 80, username: '', password: '', profileToken: '' })
+  const [form, setForm] = useState(DEFAULT_FORM)
   const [formError, setFormError] = useState('')
 
   const addMut = useMutation({
@@ -60,7 +76,7 @@ function CameraRegistry() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cameras'] })
       setShowForm(false)
-      setForm({ cameraId: '', ipAddress: '', onvifPort: 80, username: '', password: '', profileToken: '' })
+      setForm(DEFAULT_FORM)
       setFormError('')
     },
     onError: (e: Error) => setFormError(e.message),
@@ -109,6 +125,29 @@ function CameraRegistry() {
             <Field label="Username"    value={form.username}      onChange={(v) => setForm((f) => ({ ...f, username: v }))} />
             <Field label="Password"    value={form.password}      type="password" onChange={(v) => setForm((f) => ({ ...f, password: v }))} />
             <Field label="Profile Token" value={form.profileToken} onChange={(v) => setForm((f) => ({ ...f, profileToken: v }))} />
+            <Field label="Media Service Path (default: /onvif/media)"
+                   value={form.mediaServicePath}
+                   onChange={(v) => setForm((f) => ({ ...f, mediaServicePath: v }))} />
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: 'var(--color-text-muted)' }}>Video Codec</label>
+              <select value={form.videoCodec}
+                      onChange={(e) => setForm((f) => ({ ...f, videoCodec: e.target.value as 'H264' | 'H265' }))}
+                      className={inputCls}>
+                <option value="H264">H.264</option>
+                <option value="H265">H.265</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1" style={{ color: 'var(--color-text-muted)' }}>Use HTTPS</label>
+              <label className="flex items-center gap-2 px-3 py-2">
+                <input type="checkbox"
+                       checked={form.useTls}
+                       onChange={(e) => setForm((f) => ({ ...f, useTls: e.target.checked }))} />
+                <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  {form.useTls ? 'https://' : 'http://'}
+                </span>
+              </label>
+            </div>
           </div>
           <button
             onClick={handleAdd}
@@ -151,14 +190,35 @@ function CameraRegistry() {
 function CameraRow({ cam, onDelete, onSave, isSaving }: {
   cam: CameraEntry
   onDelete: () => void
-  onSave: (data: { ipAddress: string; onvifPort: number; username: string; password?: string; profileToken: string }) => void
+  onSave: (data: {
+    ipAddress: string; onvifPort: number; username: string; password?: string; profileToken: string;
+    useTls?: boolean; mediaServicePath?: string; videoCodec?: 'H264' | 'H265';
+  }) => void
   isSaving: boolean
 }) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState({ ipAddress: cam.ipAddress, onvifPort: cam.onvifPort, username: cam.username, password: '', profileToken: cam.profileToken })
+  const [draft, setDraft] = useState({
+    ipAddress: cam.ipAddress,
+    onvifPort: cam.onvifPort,
+    username: cam.username,
+    password: '',
+    profileToken: cam.profileToken,
+    useTls: cam.useTls ?? false,
+    mediaServicePath: cam.mediaServicePath ?? '/onvif/media',
+    videoCodec: (cam.videoCodec ?? 'H264') as 'H264' | 'H265',
+  })
 
   const handleSave = () => {
-    onSave({ ...draft, onvifPort: Number(draft.onvifPort), password: draft.password || undefined })
+    onSave({
+      ipAddress: draft.ipAddress,
+      onvifPort: Number(draft.onvifPort),
+      username: draft.username,
+      password: draft.password || undefined,
+      profileToken: draft.profileToken,
+      useTls: draft.useTls,
+      mediaServicePath: draft.mediaServicePath,
+      videoCodec: draft.videoCodec,
+    })
     setEditing(false)
   }
 
@@ -184,19 +244,35 @@ function CameraRow({ cam, onDelete, onSave, isSaving }: {
                    className={inputCls} placeholder="Profile Token" />
           </td>
           <td className="px-4 py-2" colSpan={2}>
-            <div className="flex items-center gap-2">
-              <input type="password" value={draft.password} onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))}
-                     className={inputCls} placeholder="New password (leave blank to keep)" style={{ maxWidth: '200px' }} />
-              <button onClick={handleSave} disabled={isSaving}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-50"
-                      style={{ background: 'var(--color-accent)' }}>
-                <Check size={12} />{isSaving ? 'Saving…' : 'Save'}
-              </button>
-              <button onClick={() => setEditing(false)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
-                      style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }}>
-                <X size={12} />Cancel
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <input type="password" value={draft.password} onChange={(e) => setDraft((d) => ({ ...d, password: e.target.value }))}
+                       className={inputCls} placeholder="New password (leave blank to keep)" style={{ maxWidth: '200px' }} />
+                <label className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  <input type="checkbox" checked={draft.useTls}
+                         onChange={(e) => setDraft((d) => ({ ...d, useTls: e.target.checked }))} />
+                  HTTPS
+                </label>
+                <select value={draft.videoCodec}
+                        onChange={(e) => setDraft((d) => ({ ...d, videoCodec: e.target.value as 'H264' | 'H265' }))}
+                        className={inputCls} style={{ width: '90px' }}>
+                  <option value="H264">H.264</option>
+                  <option value="H265">H.265</option>
+                </select>
+                <input value={draft.mediaServicePath}
+                       onChange={(e) => setDraft((d) => ({ ...d, mediaServicePath: e.target.value }))}
+                       className={inputCls} placeholder="/onvif/media" style={{ maxWidth: '180px' }} />
+                <button onClick={handleSave} disabled={isSaving}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+                        style={{ background: 'var(--color-accent)' }}>
+                  <Check size={12} />{isSaving ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => setEditing(false)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
+                        style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }}>
+                  <X size={12} />Cancel
+                </button>
+              </div>
             </div>
           </td>
         </tr>
@@ -209,10 +285,23 @@ function CameraRow({ cam, onDelete, onSave, isSaving }: {
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-surface2)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
       <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--color-text-primary)' }}>{cam.cameraId}</td>
-      <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{cam.ipAddress}</td>
+      <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <span title={`${cam.useTls ? 'https' : 'http'}://${cam.ipAddress}:${cam.onvifPort}${cam.mediaServicePath ?? '/onvif/media'}`}>
+          {cam.useTls ? 'https://' : ''}{cam.ipAddress}
+        </span>
+      </td>
       <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{cam.onvifPort}</td>
       <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{cam.username}</td>
-      <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>{cam.profileToken}</td>
+      <td className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span>{cam.profileToken}</span>
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                style={{ background: cam.videoCodec === 'H265' ? '#ede9fe' : '#e0f2fe',
+                         color:      cam.videoCodec === 'H265' ? '#7c3aed' : '#0369a1' }}>
+            {cam.videoCodec ?? 'H264'}
+          </span>
+        </div>
+      </td>
       <td className="px-4 py-2.5">
         <span className="inline-flex items-center gap-1 text-xs font-semibold"
               style={{ color: cam.isReachable ? '#4ade80' : '#4b5563' }}>

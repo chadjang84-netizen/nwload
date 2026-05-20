@@ -19,6 +19,10 @@ class CameraRegistryEntry:
     encrypted_password: bytes
     profile_token: str
     is_reachable: bool = True
+    # ONVIF endpoint 커스터마이즈 (제조사별 차이 흡수)
+    use_tls: bool = False                          # False=http, True=https
+    media_service_path: str = "/onvif/media"       # 카메라마다 다를 수 있음
+    video_codec: str = "H264"                      # "H264" or "H265"
 
 
 @dataclass
