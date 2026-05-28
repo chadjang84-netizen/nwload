@@ -36,6 +36,8 @@ except ImportError:
     import urllib.error as _urllib_err
     _USE_REQUESTS = False
 
+_VERIFY_SSL = True  # main()에서 --insecure 시 False로 설정
+
 # ── 패킷 포맷 상수 ─────────────────────────────────────────────────────────────
 PACKET_LENGTH  = 67
 VERSION        = 0x01
@@ -48,9 +50,15 @@ HEADER_FMT     = ">BBH15s"    # 1+1+2+15 = 19 bytes
 RAT_BLOCK_FMT  = ">B3s5sIQH"  # 1+3+5+4+8+2 = 23 bytes
 
 # PLMN ID — 한국 SKT: MCC=450, MNC=05
-# 3GPP TS 24.008 BCD 인코딩: MCC digit2|digit1, MCC digit3|MNC digit3, MNC digit2|digit1
-# MCC=4,5,0 / MNC=0,5 → nibble: 54 F0 05 (MNC digit3=F=absent)
-DEFAULT_PLMN   = bytes([0x54, 0xF0, 0x05])
+# 3GPP TS 24.008 BCD 인코딩:
+#   Byte 0: [MCC digit2 | MCC digit1]
+#   Byte 1: [MNC digit3 | MCC digit3]   (MNC가 2자리이면 digit3 = 0xF)
+#   Byte 2: [MNC digit2 | MNC digit1]
+# MCC=4,5,0 / MNC=0,5 → 54 F0 50
+#   Byte 0: (digit2=5)(digit1=4) = 0x54
+#   Byte 1: (digit3=F)(MCC d3=0) = 0xF0
+#   Byte 2: (MNC d2=5)(MNC d1=0) = 0x50
+DEFAULT_PLMN   = bytes([0x54, 0xF0, 0x50])
 
 # ── 셀 구성 상수 ──────────────────────────────────────────────────────────────
 # LTE Band 3 (EARFCN 1200~1949, 서버 임계값 band:3)
@@ -517,12 +525,13 @@ class ScenarioController:
 # ── OutputManager ─────────────────────────────────────────────────────────────
 
 class OutputManager:
-    """UDP 송신, JSON 로그, 바이너리 출력을 관리한다."""
+    """UDP/HTTP 송신, JSON 로그, 바이너리 출력을 관리한다."""
 
-    def __init__(self, mode: str, host: str, port: int, output_dir: str):
+    def __init__(self, mode: str, host: str, port: int, output_dir: str, http_url: str = ""):
         self._mode       = mode
         self._host       = host
         self._port       = port
+        self._http_url   = http_url.rstrip("/")
         self._output_dir = output_dir
         self._json_log: List[dict] = []
         self._binary_buf = bytearray()
@@ -546,6 +555,8 @@ class OutputManager:
     ) -> None:
         if self._mode == "realtime":
             self._udp_send(pkt)
+        elif self._mode == "http":
+            self._http_send(pkt)
 
         entry = self._make_log_entry(device, ul_rb, sim_time_ms, phase, pkt)
         self._json_log.append(entry)
@@ -559,6 +570,35 @@ class OutputManager:
             self._err_count += 1
             if self._err_count <= 5:
                 print(f"  [UDP ERROR] {e}")
+
+    def _http_send(self, pkt: bytes) -> None:
+        """HTTP POST /api/ingest/packet으로 67B 바이너리 전송."""
+        target = f"{self._http_url}/api/ingest/packet"
+        try:
+            if _USE_REQUESTS:
+                r = _requests.post(
+                    target,
+                    data=pkt,
+                    headers={"Content-Type": "application/octet-stream"},
+                    timeout=5,
+                    verify=_VERIFY_SSL,
+                )
+                if r.status_code >= 400:
+                    self._err_count += 1
+                    if self._err_count <= 5:
+                        print(f"  [HTTP ERROR {r.status_code}] {r.text[:120]}")
+            else:
+                req = _urllib_req.Request(
+                    target,
+                    data=pkt,
+                    method="POST",
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+                _urllib_req.urlopen(req, timeout=5)
+        except Exception as e:
+            self._err_count += 1
+            if self._err_count <= 5:
+                print(f"  [HTTP ERROR] {e}")
 
     def teardown(self) -> None:
         if self._sock:
@@ -703,8 +743,8 @@ def main() -> None:
         description="Advanced Cell Traffic Simulator - 50 cells, 100 devices, 3-phase scenario"
     )
     parser.add_argument(
-        "--mode", choices=["realtime", "file"], default="realtime",
-        help="realtime: UDP 즉시 전송 / file: 파일만 생성 (기본: realtime)"
+        "--mode", choices=["realtime", "http", "file"], default="realtime",
+        help="realtime: UDP 즉시 전송 / http: HTTP /api/ingest/packet 전송 / file: 파일만 생성 (기본: realtime)"
     )
     parser.add_argument(
         "--host", default="localhost",
@@ -742,6 +782,10 @@ def main() -> None:
         "--verbose", action="store_true",
         help="셀 전이/단말 액션 발생 시 상세 출력"
     )
+    parser.add_argument(
+        "--insecure", action="store_true",
+        help="SSL 인증서 검증 비활성화 (회사 프록시 환경에서 사용)"
+    )
     # 향후 Kafka 확장용 플래그 (현재 미구현)
     parser.add_argument(
         "--kafka-brokers", default="",
@@ -749,20 +793,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # 실시간 모드에서 백엔드 HTTP 연결 확인 (카메라/매핑 등록용)
-    if args.mode == "realtime":
+    # SSL 인증서 검증 비활성화 (회사 프록시/MITM 환경용)
+    if args.insecure:
+        global _VERIFY_SSL
+        _VERIFY_SSL = False
+        import ssl as _ssl
+        _ssl._create_default_https_context = _ssl._create_unverified_context
+        if _USE_REQUESTS:
+            import urllib3 as _urllib3
+            _urllib3.disable_warnings(_urllib3.exceptions.InsecureRequestWarning)
+        print("[WARN] SSL 인증서 검증 비활성화됨 (--insecure)")
+
+    # realtime/http 모드에서 백엔드 HTTP 연결 확인 (카메라/매핑 등록용)
+    if args.mode in ("realtime", "http"):
         try:
             if _USE_REQUESTS:
-                r = _requests.get(f"{args.url}/api/config", timeout=3)
+                r = _requests.get(f"{args.url}/api/config", timeout=5, verify=_VERIFY_SSL)
                 r.raise_for_status()
             else:
-                _urllib_req.urlopen(f"{args.url}/api/config", timeout=3)
+                _urllib_req.urlopen(f"{args.url}/api/config", timeout=5)
             print(f"백엔드 HTTP 연결 확인: {args.url}")
         except Exception as e:
             print(f"[ERROR] 백엔드 HTTP 연결 실패: {e}")
             print("  --mode file 옵션으로 파일 생성 모드를 사용하거나 서버를 먼저 시작하세요.")
             return
-        print(f"UDP 전송 대상: {args.host}:{args.port}")
+        if args.mode == "realtime":
+            print(f"UDP 전송 대상: {args.host}:{args.port}")
+        else:
+            print(f"HTTP 전송 대상: {args.url}/api/ingest/packet")
 
     # 구성 요약 출력
     total_min  = PHASE3_END_MIN
@@ -790,11 +848,11 @@ def main() -> None:
     dev_reg.build()
     traffic    = TrafficModel(seed=args.seed)
     scenario   = ScenarioController(dev_reg, cell_reg, speed_factor=args.speed_factor)
-    output     = OutputManager(args.mode, args.host, args.port, args.output_dir)
+    output     = OutputManager(args.mode, args.host, args.port, args.output_dir, http_url=args.url)
     sim        = Simulator(dev_reg, traffic, scenario, output, verbose=args.verbose)
 
-    # ONVIF 검증용 카메라 자동 등록 (realtime 모드)
-    if args.mode == "realtime":
+    # ONVIF 검증용 카메라 자동 등록 (realtime/http 모드)
+    if args.mode in ("realtime", "http"):
         _setup_cameras(args.url, dev_reg)
 
     sim.run()
@@ -822,7 +880,7 @@ def _setup_cameras(url: str, dev_reg: DeviceRegistry) -> None:
         }
         try:
             if _USE_REQUESTS:
-                r = _requests.post(f"{base}/api/cameras", json=cam_body, timeout=3)
+                r = _requests.post(f"{base}/api/cameras", json=cam_body, timeout=5, verify=_VERIFY_SSL)
                 if r.status_code in (200, 201, 409):
                     registered += 1
             else:
@@ -847,7 +905,7 @@ def _setup_cameras(url: str, dev_reg: DeviceRegistry) -> None:
         map_body = {"routerCtn": ctn, "cameraId": cam_id}
         try:
             if _USE_REQUESTS:
-                r = _requests.post(f"{base}/api/mappings", json=map_body, timeout=3)
+                r = _requests.post(f"{base}/api/mappings", json=map_body, timeout=5, verify=_VERIFY_SSL)
                 if r.status_code in (200, 201, 409):
                     mapped += 1
             else:

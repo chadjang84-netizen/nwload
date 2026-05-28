@@ -158,7 +158,7 @@ function CellDeviceModal({ cell, onClose }: { cell: CellStatus; onClose: () => v
           <table className="w-full text-sm">
             <thead style={{ borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1, background: '#f8fafc' }}>
               <tr>
-                {['Router CTN', 'Band', 'ECGI', 'UL_RB', 'Timestamp', 'Device State', 'Quality Profile'].map((h) => (
+                {['Router CTN', 'PLMN', 'Band', 'ECGI', 'UL_RB', 'Timestamp', 'Device State', 'Quality Profile'].map((h) => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider px-4 py-3"
                       style={{ color: '#94a3b8' }}>{h}</th>
                 ))}
@@ -166,10 +166,10 @@ function CellDeviceModal({ cell, onClose }: { cell: CellStatus; onClose: () => v
             </thead>
             <tbody>
               {isFetching && (
-                <tr><td colSpan={7} className="text-center py-10 text-sm" style={{ color: '#94a3b8' }}>Loading…</td></tr>
+                <tr><td colSpan={8} className="text-center py-10 text-sm" style={{ color: '#94a3b8' }}>Loading…</td></tr>
               )}
               {!isFetching && devices.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-10 text-sm" style={{ color: '#94a3b8' }}>No device data</td></tr>
+                <tr><td colSpan={8} className="text-center py-10 text-sm" style={{ color: '#94a3b8' }}>No device data</td></tr>
               )}
               {devices.map((d) => (
                 <DeviceDetailRow key={d.routerCtn} d={d} />
@@ -194,6 +194,7 @@ function DeviceDetailRow({ d }: { d: CellDeviceDetail }) {
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       <td className="px-4 py-2.5 font-mono text-xs font-semibold" style={{ color: '#1e293b' }}>{d.routerCtn}</td>
+      <td className="px-4 py-2.5 text-xs" style={{ color: '#475569' }}>{d.plmn ?? 'Unknown'}</td>
       <td className="px-4 py-2.5 text-xs font-mono" style={{ color: '#64748b' }}>B{d.band}</td>
       <td className="px-4 py-2.5 text-xs font-mono" style={{ color: '#64748b' }}>{d.ecgi}</td>
       <td className="px-4 py-2.5 text-xs font-bold" style={{ color: '#1e293b' }}>{d.ulRbUsage.toLocaleString()}</td>

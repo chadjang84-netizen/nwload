@@ -33,6 +33,7 @@ export interface CellDeviceDetail {
   timestamp: string
   deviceState: DeviceState
   qualityProfile: QualityProfile
+  plmn: string                  // 예: "Uplus (450-06)"
 }
 
 export interface DeviceStatus {

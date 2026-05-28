@@ -21,4 +21,5 @@ class EventConverter:
             grouping_key=GroupingKey(ecgi=block.ecgi, band=band),
             ul_rb_usage=block.ul_rb_usage,
             timestamp=received_at,
+            plmn_id=block.plmn_id,
         )

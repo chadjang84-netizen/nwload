@@ -51,6 +51,7 @@ class CellDeviceDetailSchema(BaseModel):
     timestamp: str
     deviceState: str
     qualityProfile: str
+    plmn: str = "Unknown"   # 예: "Uplus (450-06)"
 
 
 # ── 단말 상태 ─────────────────────────────────────────────────────────────────

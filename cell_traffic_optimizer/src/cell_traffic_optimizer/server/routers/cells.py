@@ -6,6 +6,7 @@ from ..deps import get_state
 from ..state import AppState
 from ..schemas import CellStatusSchema, CellDeviceDetailSchema, GroupingKeySchema
 from ...models import GroupingKey
+from ...parser import format_plmn
 
 router = APIRouter(prefix="/api/cells", tags=["cells"])
 
@@ -64,6 +65,7 @@ def list_cell_devices(ecgi: int, band: int, state: AppState = Depends(get_state)
     for ctn, event in latest.items():
         d_state = device_sm._get_state(ctn)
         d_profile = device_sm._profiles.get(ctn)
+        plmn_bytes = getattr(event, "plmn_id", b"\x00\x00\x00")
         result.append(CellDeviceDetailSchema(
             routerCtn=ctn,
             band=event.grouping_key.band,
@@ -72,6 +74,7 @@ def list_cell_devices(ecgi: int, band: int, state: AppState = Depends(get_state)
             timestamp=_ts(event.timestamp),
             deviceState=d_state.value if d_state else "NORMAL",
             qualityProfile=d_profile.value if d_profile else "NORMAL",
+            plmn=format_plmn(plmn_bytes),
         ))
 
     result.sort(key=lambda x: x.ulRbUsage, reverse=True)

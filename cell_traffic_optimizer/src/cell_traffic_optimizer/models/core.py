@@ -39,6 +39,7 @@ class RawEvent:
     grouping_key: GroupingKey
     ul_rb_usage: int
     timestamp: float
+    plmn_id: bytes = b"\x00\x00\x00"   # 3바이트 BCD PLMN_ID (3GPP TS 24.008)
 
 
 @dataclass
