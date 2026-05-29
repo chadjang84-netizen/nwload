@@ -76,7 +76,7 @@ export function CellStatusPanel({ cell, overloadEnter, slidingWindowSeconds }: P
           <div className="flex-1 px-2.5 pt-2.5 pb-1.5">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                ECGI {cell.groupingKey.ecgi} · B{cell.groupingKey.band}
+                ECI/NCI {cell.groupingKey.ecgi} · B{cell.groupingKey.band}
               </span>
               <CellStateBadge state={cell.state} />
             </div>
@@ -144,7 +144,7 @@ function CellDeviceModal({ cell, onClose }: { cell: CellStatus; onClose: () => v
              style={{ borderBottom: '1px solid #e2e8f0' }}>
           <div className="flex items-center gap-3">
             <span className="font-mono text-sm font-semibold" style={{ color: '#1e293b' }}>
-              ECGI {cell.groupingKey.ecgi} · B{cell.groupingKey.band}
+              ECI/NCI {cell.groupingKey.ecgi} · B{cell.groupingKey.band}
             </span>
             <CellStateBadge state={cell.state} />
             <span className="text-xs" style={{ color: '#94a3b8' }}>{cell.ctnList.length} Devices</span>
@@ -158,7 +158,7 @@ function CellDeviceModal({ cell, onClose }: { cell: CellStatus; onClose: () => v
           <table className="w-full text-sm">
             <thead style={{ borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 1, background: '#f8fafc' }}>
               <tr>
-                {['Router CTN', 'PLMN', 'Band', 'ECGI', 'UL_RB', 'Timestamp', 'Device State', 'Quality Profile'].map((h) => (
+                {['Router CTN', 'PLMN', 'Band', 'ECI/NCI', 'UL_RB', 'Timestamp', 'Device State', 'Quality Profile'].map((h) => (
                   <th key={h} className="text-left text-xs font-semibold uppercase tracking-wider px-4 py-3"
                       style={{ color: '#94a3b8' }}>{h}</th>
                 ))}

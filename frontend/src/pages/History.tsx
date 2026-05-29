@@ -267,7 +267,7 @@ function CellHistory() {
       <div className="rounded-xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">
-            <Field label="ECGI">
+            <Field label="ECI/NCI">
               <input value={ecgiInput} onChange={(e) => setEcgiInput(e.target.value)}
                      placeholder="e.g. 100001" className={inputCls + ' w-full'} />
             </Field>
@@ -342,7 +342,7 @@ function CellCard({ group }: { group: CellGroup }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="font-mono text-sm font-bold" style={{ color: '#0f172a' }}>
-            ECGI {group.ecgi}
+            ECI/NCI {group.ecgi}
           </span>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold"
                 style={{ background: '#eff6ff', color: '#2563eb' }}>
