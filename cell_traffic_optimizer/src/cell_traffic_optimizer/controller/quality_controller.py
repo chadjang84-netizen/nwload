@@ -101,6 +101,46 @@ class QualityController:
         """CTN에 카메라가 매핑되어 있는지 확인한다."""
         return bool(self._mapping.get_camera_ids(ctn))
 
+    def is_already_at_default(self, ctn: str, tolerance: float = 0.9) -> bool:
+        """매핑된 모든 카메라의 실제 bitrate가 캐시된 원본값 근처(>= 원본 × tolerance)인지
+        ONVIF GET으로 확인한다. 카메라 재부팅 등으로 NVRAM 원본값이 복원된 경우를
+        감지해 잘못된 step_up SET을 방지하기 위한 가드.
+
+        반환값:
+            True  - 모든 카메라가 이미 원본 상태 → SET 불필요
+            False - 한 대라도 저화질 상태이거나 GET 실패 → 정상 step_up 흐름 진행
+        """
+        camera_ids = self._mapping.get_camera_ids(ctn)
+        if not camera_ids:
+            return False
+        for camera_id in camera_ids:
+            entry = self._camera_registry.get(camera_id)
+            default = self._default_configs.get(camera_id)
+            if entry is None or default is None:
+                return False
+            password = self._camera_registry.get_password(camera_id)
+            try:
+                actual = self._client.get_video_encoder_configuration(
+                    ip=entry.ip_address,
+                    port=entry.onvif_port,
+                    username=entry.username,
+                    password=password,
+                    profile_token=entry.profile_token,
+                    use_tls=getattr(entry, "use_tls", False),
+                    media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
+                )
+            except Exception as e:
+                logger.warning("Camera %s GET (drift check) failed: %s", camera_id, e)
+                return False
+            if actual["bitrate"] < default["bitrate"] * tolerance:
+                logger.debug(
+                    "Camera %s still at low bitrate (%d < %d * %.2f) — step_up needed",
+                    camera_id, actual["bitrate"], default["bitrate"], tolerance,
+                )
+                return False
+        logger.info("CTN %s cameras already at default bitrate (reboot or external reset detected)", ctn)
+        return True
+
     def apply_profile(self, ctn: str, profile: QualityProfile) -> list:
         """OVERLOAD/step_up 시 호출 — 캐시된 기본값 기반으로 bitrate 비율 적용."""
         camera_ids = self._mapping.get_camera_ids(ctn)

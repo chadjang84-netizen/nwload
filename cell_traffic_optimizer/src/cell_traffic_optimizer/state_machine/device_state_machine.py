@@ -215,6 +215,36 @@ class DeviceStateMachine:
             action=DeviceAction.DOWNGRADE, timestamp=timestamp,
         )
 
+    def force_normal(self, ctn: str, timestamp: float) -> DeviceActionResult:
+        """RECOVERY_PENDING 상태의 단말을 step_up 단계를 건너뛰고 즉시 NORMAL로 정리한다.
+
+        카메라가 외부 요인(재부팅 등)으로 이미 원본 상태로 복원된 것이 확인된 경우,
+        잘못된 STEP_UP SET을 보내지 않고 서버 상태만 정합성 있게 마감하기 위해 사용한다.
+        """
+        current = self._get_state(ctn)
+        current_profile = self._get_profile(ctn)
+
+        if current != DeviceState.RECOVERY_PENDING:
+            return DeviceActionResult(
+                success=False, router_ctn=ctn,
+                previous_state=current, new_state=current,
+                previous_profile=current_profile, new_profile=current_profile,
+                action=None, timestamp=timestamp,
+                message=f"Cannot force_normal from {current}",
+            )
+
+        self._states.pop(ctn, None)
+        self._profiles.pop(ctn, None)
+        self._update_history(ctn, DeviceState.NORMAL, DeviceAction.RESTORE, timestamp, QualityProfile.NORMAL)
+
+        logger.info("Device %s force-restored to NORMAL (external reset detected) at %.0f", ctn, timestamp)
+        return DeviceActionResult(
+            success=True, router_ctn=ctn,
+            previous_state=DeviceState.RECOVERY_PENDING, new_state=DeviceState.NORMAL,
+            previous_profile=current_profile, new_profile=QualityProfile.NORMAL,
+            action=DeviceAction.RESTORE, timestamp=timestamp,
+        )
+
     def is_cooldown_expired(self, ctn: str, now: float) -> bool:
         h = self._histories.get(ctn)
         if h is None or h.cooldown_start_time is None:

@@ -132,7 +132,10 @@ async def lifespan(app: FastAPI):
                 window_result = state.pipeline.check_window_expiry(now)
                 await _broadcast_window_result(state, window_result, now)
 
-                actions = state.pipeline.check_recovery_timers(now)
+                # 셀 이동으로 NORMAL 셀에 속하게 된 DEGRADED 단말을 회복 흐름으로 진입
+                orphan_actions = state.pipeline.check_orphan_degraded(now)
+
+                actions = orphan_actions + state.pipeline.check_recovery_timers(now)
                 if not actions:
                     continue
 
@@ -161,14 +164,19 @@ async def lifespan(app: FastAPI):
                         },
                     })
 
-                    event_type = "DEVICE_RESTORED"
+                    if action.new_state == DeviceState.RECOVERY_PENDING:
+                        event_type = "DEVICE_RECOVERY_STARTED"
+                        msg = f"Device {action.router_ctn} entered recovery (cooldown started)"
+                    else:
+                        event_type = "DEVICE_RESTORED"
+                        msg = f"Device {action.router_ctn} step-up to {action.new_profile.value}"
                     alert = {
                         "id": str(uuid.uuid4()),
                         "timestamp": now_iso,
                         "eventType": event_type,
                         "groupingKey": None,
                         "routerCtn": action.router_ctn,
-                        "message": f"Device {action.router_ctn} step-up to {action.new_profile.value}",
+                        "message": msg,
                     }
                     state.event_store.insert(alert)
                     await broadcast(state, {"type": "alert", "data": alert})

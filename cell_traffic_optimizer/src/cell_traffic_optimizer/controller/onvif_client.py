@@ -167,7 +167,7 @@ class OnvifClient:
     </tt:Multicast>
     <tt:SessionTimeout>PT60S</tt:SessionTimeout>
   </trt:Configuration>
-  <trt:ForcePersistence>true</trt:ForcePersistence>
+  <trt:ForcePersistence>false</trt:ForcePersistence>
 </trt:SetVideoEncoderConfiguration>"""
 
         xml = _post(url, _soap(wsse, body))

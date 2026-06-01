@@ -167,6 +167,25 @@ class DataPipeline:
 
         return result
 
+    def check_orphan_degraded(self, now: float) -> list:
+        """현재 속한 셀이 NORMAL인 DEGRADED 단말을 회복 흐름으로 진입시킨다.
+
+        핸드오버로 단말이 OVERLOAD 셀에서 NORMAL 셀로 이동한 경우, 이전 셀의
+        transition 시점에는 이미 ctn_map에서 빠져있어 start_recovery가
+        호출되지 않는다. 이 메서드가 주기적으로 그 누락분을 보완한다.
+        """
+        actions = []
+        for ctn in list(self._device_sm._states.keys()):
+            if self._device_sm._get_state(ctn) != DeviceState.DEGRADED:
+                continue
+            if not self._is_device_cell_normal(ctn):
+                continue
+            action = self._device_sm.start_recovery(ctn, now)
+            if action.success:
+                actions.append(action)
+                logger.info("Orphan DEGRADED %s entered RECOVERY_PENDING (cell is NORMAL)", ctn)
+        return actions
+
     def check_recovery_timers(self, now: float) -> list:
         actions = []
         for ctn, history in list(self._device_sm._histories.items()):
@@ -179,6 +198,15 @@ class DataPipeline:
             cell_is_normal = self._is_device_cell_normal(ctn)
 
             if cell_is_normal:
+                # A안 가드: 카메라가 이미 원본 상태(재부팅 등으로 복원)이면 step_up SET을
+                # 보내지 않고 서버 상태만 NORMAL로 정리한다. 잘못된 STEP_UP×0.5 SET 방지.
+                if self._quality_ctrl.is_already_at_default(ctn):
+                    action = self._device_sm.force_normal(ctn, now)
+                    actions.append(action)
+                    if action.success:
+                        logger.info("Skipped step_up for %s (cameras already at default)", ctn)
+                    continue
+
                 action = self._device_sm.step_up(ctn, now)
                 actions.append(action)
                 if action.success:
