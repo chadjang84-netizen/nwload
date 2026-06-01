@@ -41,13 +41,23 @@ class TrafficAggregator:
         """윈도우 만료 시각이 된 키의 확정 GroupStats를 반환하고 타이머를 갱신한다.
 
         반환된 키에 대해서만 evaluator를 호출해야 한다.
+
+        주의: 패킷이 더 이상 들어오지 않으면 add_event 경로의 _evict_expired가
+        호출되지 않아 만료 이벤트가 합산에 계속 포함되는 문제가 있었다.
+        시간 흐름만으로도 윈도우가 비워지도록 평가 직전에 만료 이벤트를 정리한다.
         """
+        self._evict_expired(now)
         expired = {}
+        active = self.active_keys()
         for key, last in list(self._last_evaluated.items()):
             if now - last >= self._window_seconds:
                 stats = self.get_group_stats(key)
                 expired[key] = stats
-                self._last_evaluated[key] = now  # 다음 윈도우 시작
+                if key in active:
+                    self._last_evaluated[key] = now  # 다음 윈도우 시작
+                else:
+                    # 더 이상 이 키에 이벤트가 없으면 타이머도 정리
+                    del self._last_evaluated[key]
         return expired
 
     def _evict_expired(self, now: float) -> None:
