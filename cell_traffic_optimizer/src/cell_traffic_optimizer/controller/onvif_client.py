@@ -65,8 +65,23 @@ def _post(url: str, payload: bytes) -> str:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        return resp.read().decode()
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            return resp.read().decode()
+    except urllib.error.HTTPError as e:
+        # 카메라는 4xx/5xx와 함께 SOAP Fault 본문에 실제 원인을 담아 보낸다.
+        # urllib는 본문을 버리고 "HTTP Error 500" 껍데기만 남기므로, 직접 읽어 메시지에 포함시킨다.
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            pass
+        fault = (
+            _text(body, "Text")          # SOAP 1.2 Fault/Reason/Text
+            or _text(body, "faultstring")  # SOAP 1.1 Fault
+            or " ".join(body.split())[:300]  # fault 태그가 없으면 본문 앞부분
+        )
+        raise RuntimeError(f"HTTP {e.code} {e.reason} — {fault or '(empty body)'}") from e
 
 
 def _text(xml: str, tag: str) -> str | None:
