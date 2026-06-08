@@ -26,6 +26,31 @@ class ONVIFClient(Protocol):
         """Return dict with keys: bitrate (int), framerate (int), resolution (tuple)."""
         ...
 
+    def get_video_encoder_configurations(
+        self,
+        ip: str,
+        port: int,
+        username: str,
+        password: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+    ) -> list:
+        """Return a list of available VideoEncoderConfiguration tokens."""
+        ...
+
+    def resolve_token(
+        self,
+        ip: str,
+        port: int,
+        username: str,
+        password: str,
+        profile_token: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+    ) -> str:
+        """Return profile_token if given, else auto-discover the first encoder token."""
+        ...
+
     def set_video_encoder_configuration(
         self,
         ip: str,
@@ -84,11 +109,34 @@ class QualityController:
         self.command_log: list[CommandLogEntry] = []
         # camera_id -> {"bitrate": int, "framerate": int, "resolution": tuple}
         self._default_configs: dict[str, dict] = {}
+        # camera_id -> 자동 발견(또는 입력) 후 확정된 VideoEncoderConfiguration token
+        self._resolved_tokens: dict[str, str] = {}
 
     def _log(self, entry: CommandLogEntry) -> None:
         self.command_log.insert(0, entry)
         if len(self.command_log) > MAX_COMMAND_LOG:
             self.command_log = self.command_log[:MAX_COMMAND_LOG]
+
+    def _resolve_token(self, camera_id: str, entry, password: str) -> str:
+        """카메라의 VideoEncoderConfiguration token을 결정한다(camera_id별 캐시).
+
+        entry.profile_token이 있으면 그대로, 비어 있으면 ONVIF로 첫 토큰을 자동 발견한다.
+        GET 캐싱·drift 체크·SET이 모두 동일한 토큰을 쓰도록 캐시한다.
+        """
+        cached = self._resolved_tokens.get(camera_id)
+        if cached:
+            return cached
+        token = self._client.resolve_token(
+            ip=entry.ip_address,
+            port=entry.onvif_port,
+            username=entry.username,
+            password=password,
+            profile_token=entry.profile_token,
+            use_tls=getattr(entry, "use_tls", False),
+            media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
+        )
+        self._resolved_tokens[camera_id] = token
+        return token
 
     def prefetch_camera_defaults(self, ctn: str) -> None:
         """WARNING 진입 시 호출 — 해당 CTN 매핑 카메라의 기본값을 미리 GET해 캐시한다."""
@@ -120,12 +168,13 @@ class QualityController:
                 return False
             password = self._camera_registry.get_password(camera_id)
             try:
+                token = self._resolve_token(camera_id, entry, password)
                 actual = self._client.get_video_encoder_configuration(
                     ip=entry.ip_address,
                     port=entry.onvif_port,
                     username=entry.username,
                     password=password,
-                    profile_token=entry.profile_token,
+                    profile_token=token,
                     use_tls=getattr(entry, "use_tls", False),
                     media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
                 )
@@ -192,12 +241,13 @@ class QualityController:
             return
         password = self._camera_registry.get_password(camera_id)
         try:
+            token = self._resolve_token(camera_id, entry, password)
             config = self._client.get_video_encoder_configuration(
                 ip=entry.ip_address,
                 port=entry.onvif_port,
                 username=entry.username,
                 password=password,
-                profile_token=entry.profile_token,
+                profile_token=token,
                 use_tls=getattr(entry, "use_tls", False),
                 media_service_path=getattr(entry, "media_service_path", "/onvif/media"),
             )
@@ -253,6 +303,19 @@ class QualityController:
 
         password = self._camera_registry.get_password(camera_id)
 
+        try:
+            token = self._resolve_token(camera_id, entry, password)
+        except Exception as e:
+            logger.warning("Camera %s token resolve (SET) failed: %s", camera_id, e)
+            self._log(CommandLogEntry(
+                timestamp=datetime.now(tz=timezone.utc).isoformat(),
+                camera_id=camera_id, router_ctn=ctn,
+                command="SetVideoEncoderConfiguration", profile=profile_name,
+                bitrate=bitrate, framerate=framerate, resolution=resolution,
+                success=False, error=str(e),
+            ))
+            return CommandResult(camera_id=camera_id, success=False, error=str(e))
+
         for attempt in range(1, self._max_retries + 1):
             try:
                 ok = self._client.set_video_encoder_configuration(
@@ -260,7 +323,7 @@ class QualityController:
                     port=entry.onvif_port,
                     username=entry.username,
                     password=password,
-                    profile_token=entry.profile_token,
+                    profile_token=token,
                     bitrate=bitrate,
                     framerate=framerate,
                     resolution=resolution,

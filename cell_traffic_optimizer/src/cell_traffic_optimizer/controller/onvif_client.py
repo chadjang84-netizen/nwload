@@ -90,6 +90,20 @@ def _text(xml: str, tag: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def _all_config_tokens(xml: str) -> list[str]:
+    """GetVideoEncoderConfigurationsResponse에서 각 설정의 token 속성을 문서 순서대로 추출.
+
+    응답 형태는 `<trt:Configurations token="...">`(복수형) — token은 자식 엘리먼트가
+    아니라 XML 속성이므로 _text()로는 못 뽑는다. 일부 펌웨어는 단수형 Configuration을
+    echo하기도 해 둘 다 매칭한다. 단/쌍따옴표 모두 처리.
+    """
+    matches = re.findall(
+        r"""<(?:[^:>\s]+:)?Configurations?\b[^>]*?\btoken\s*=\s*(?:"([^"]*)"|'([^']*)')""",
+        xml, re.DOTALL,
+    )
+    return [(a or b).strip() for (a, b) in matches if (a or b).strip()]
+
+
 # ── Public ONVIF client ────────────────────────────────────────────────────────
 
 class OnvifClient:
@@ -122,6 +136,53 @@ class OnvifClient:
 
         # ONVIF reports bitrate in kbps — convert to bps for internal consistency
         return {"bitrate": bitrate * 1000, "framerate": framerate, "resolution": (width, height)}
+
+    def get_video_encoder_configurations(
+        self,
+        ip: str,
+        port: int,
+        username: str,
+        password: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+    ) -> list[str]:
+        """토큰 없이 카메라의 모든 VideoEncoderConfiguration token을 조회한다."""
+        scheme = "https" if use_tls else "http"
+        url = f"{scheme}://{ip}:{port}{media_service_path}"
+        wsse = _wsse_header(username, password)
+        body = "<trt:GetVideoEncoderConfigurations/>"
+
+        xml = _post(url, _soap(wsse, body))
+        logger.debug("GetVideoEncoderConfigurations response: %s", xml[:400])
+        return _all_config_tokens(xml)
+
+    def resolve_token(
+        self,
+        ip: str,
+        port: int,
+        username: str,
+        password: str,
+        profile_token: str,
+        use_tls: bool = False,
+        media_service_path: str = "/onvif/media",
+    ) -> str:
+        """사용할 VideoEncoderConfiguration token을 결정한다.
+
+        profile_token이 주어지면 그대로 사용(네트워크 호출 없음). 비어 있으면
+        GetVideoEncoderConfigurations로 첫 토큰을 자동 발견한다.
+        """
+        if profile_token and profile_token.strip():
+            return profile_token
+        tokens = self.get_video_encoder_configurations(
+            ip=ip, port=port, username=username, password=password,
+            use_tls=use_tls, media_service_path=media_service_path,
+        )
+        if not tokens:
+            raise RuntimeError("No VideoEncoderConfiguration found on camera — cannot auto-detect token")
+        if len(tokens) > 1:
+            logger.info("Camera %s:%d has %d encoder configs; using first token '%s'",
+                        ip, port, len(tokens), tokens[0])
+        return tokens[0]
 
     def set_video_encoder_configuration(
         self,

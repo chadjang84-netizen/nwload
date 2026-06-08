@@ -118,7 +118,7 @@ class CreateCameraRequest(BaseModel):
     onvifPort: int
     username: str
     password: str
-    profileToken: str
+    profileToken: str = ""   # 비우면 ONVIF로 첫 인코더 토큰 자동 발견
     useTls: bool = False
     mediaServicePath: str = "/onvif/media"
     videoCodec: str = "H264"
@@ -129,7 +129,7 @@ class UpdateCameraRequest(BaseModel):
     onvifPort: int
     username: str
     password: Optional[str] = None   # None이면 기존 비밀번호 유지
-    profileToken: str
+    profileToken: str = ""           # 비우면 ONVIF로 첫 인코더 토큰 자동 발견
     useTls: Optional[bool] = None              # None이면 기존값 유지
     mediaServicePath: Optional[str] = None     # None이면 기존값 유지
     videoCodec: Optional[str] = None           # None이면 기존값 유지
