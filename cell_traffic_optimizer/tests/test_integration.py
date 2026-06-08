@@ -38,10 +38,16 @@ class MockONVIFClient:
     def __init__(self):
         self.calls = []
 
-    def get_video_encoder_configuration(self, ip, port, username, password, profile_token):
+    def get_video_encoder_configuration(self, ip, port, username, password, profile_token, **kwargs):
         return {"bitrate": 4096000, "framerate": 30, "resolution": (1920, 1080)}
 
-    def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution):
+    def get_video_encoder_configurations(self, ip, port, username, password, **kwargs):
+        return ["profile1"]
+
+    def resolve_token(self, ip, port, username, password, profile_token, **kwargs):
+        return profile_token or "profile1"
+
+    def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution, **kwargs):
         self.calls.append({"ip": ip, "bitrate": bitrate, "framerate": framerate})
         return True
 
@@ -205,11 +211,17 @@ def test_quality_controller_retries():
             self.calls = 0
             self.fail_count = fail_count
 
-        def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution):
+        def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution, **kwargs):
             self.calls += 1
             if self.calls <= self.fail_count:
                 return False
             return True
+
+        def resolve_token(self, ip, port, username, password, profile_token, **kwargs):
+            return profile_token or "profile1"
+
+        def get_video_encoder_configurations(self, ip, port, username, password, **kwargs):
+            return ["profile1"]
 
     failing = FailingONVIF(fail_count=2)
     cam_reg = CameraRegistry()
@@ -218,8 +230,14 @@ def test_quality_controller_retries():
     mapping.add_mapping("ctn1", "cam-001", 0.0)
 
     class MockGet:
-        def get_video_encoder_configuration(self, ip, port, username, password, profile_token):
+        def get_video_encoder_configuration(self, ip, port, username, password, profile_token, **kwargs):
             return {"bitrate": 4096000, "framerate": 30, "resolution": (1920, 1080)}
+
+        def get_video_encoder_configurations(self, ip, port, username, password, **kwargs):
+            return ["profile1"]
+
+        def resolve_token(self, ip, port, username, password, profile_token, **kwargs):
+            return profile_token or "profile1"
 
         def set_video_encoder_configuration(self, *args, **kwargs):
             return failing.set_video_encoder_configuration(*args, **kwargs)
@@ -230,3 +248,93 @@ def test_quality_controller_retries():
     results = qc.apply_profile("ctn1", QualityProfile.DEGRADED)
     assert results[0].success
     assert failing.calls == 3  # failed twice, succeeded on 3rd
+
+
+# ── ONVIF 토큰 자동 발견 ───────────────────────────────────────────────────────
+
+def test_all_config_tokens_attribute_extraction():
+    from cell_traffic_optimizer.controller.onvif_client import _all_config_tokens
+
+    # 쌍따옴표 + namespace prefix + 복수형
+    xml_double = '<trt:Configurations token="VEC_1"><tt:Name>main</tt:Name></trt:Configurations>' \
+                 '<trt:Configurations token="VEC_2"></trt:Configurations>'
+    assert _all_config_tokens(xml_double) == ["VEC_1", "VEC_2"]
+
+    # 단따옴표 + prefix 없음 + 단수형 fallback
+    xml_single = "<Configuration token='ENC0'></Configuration>"
+    assert _all_config_tokens(xml_single) == ["ENC0"]
+
+    # config 없음 → 빈 리스트
+    assert _all_config_tokens("<trt:GetVideoEncoderConfigurationsResponse/>") == []
+
+
+def test_resolve_token_blank_autodetects():
+    """profile_token이 비면 GetVideoEncoderConfigurations 첫 토큰을 자동 사용하고 캐시한다."""
+    class DiscoverClient:
+        def __init__(self):
+            self.discover_calls = 0
+            self.set_tokens = []
+
+        def get_video_encoder_configurations(self, ip, port, username, password, **kwargs):
+            self.discover_calls += 1
+            return ["tokA", "tokB"]
+
+        def resolve_token(self, ip, port, username, password, profile_token, **kwargs):
+            if profile_token and profile_token.strip():
+                return profile_token
+            return self.get_video_encoder_configurations(ip, port, username, password, **kwargs)[0]
+
+        def get_video_encoder_configuration(self, ip, port, username, password, profile_token, **kwargs):
+            return {"bitrate": 4096000, "framerate": 30, "resolution": (1920, 1080)}
+
+        def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution, **kwargs):
+            self.set_tokens.append(profile_token)
+            return True
+
+    client = DiscoverClient()
+    cam_reg = CameraRegistry()
+    cam_reg.register("cam-001", "1.2.3.4", 80, "admin", "pass", "")  # blank token
+    mapping = DeviceCameraMapping()
+    mapping.add_mapping("ctn1", "cam-001", 0.0)
+
+    qc = QualityController(client, cam_reg, mapping, degraded_ratio=0.25, step_up_ratio=0.50, max_retries=1)
+    results = qc.apply_profile("ctn1", QualityProfile.DEGRADED)
+
+    assert results[0].success
+    assert client.set_tokens == ["tokA"]          # 자동 발견된 첫 토큰으로 SET
+    assert qc._resolved_tokens["cam-001"] == "tokA"  # 캐시됨
+    assert client.discover_calls == 1             # GET 캐싱+SET이 토큰을 공유 → 발견 1회
+
+
+def test_resolve_token_provided_passthrough():
+    """profile_token이 주어지면 발견 호출 없이 그대로 사용한다(하위 호환)."""
+    class NoDiscoverClient:
+        def __init__(self):
+            self.set_tokens = []
+
+        def get_video_encoder_configurations(self, ip, port, username, password, **kwargs):
+            raise AssertionError("discovery should not be called when token is provided")
+
+        def resolve_token(self, ip, port, username, password, profile_token, **kwargs):
+            if profile_token and profile_token.strip():
+                return profile_token
+            return self.get_video_encoder_configurations(ip, port, username, password, **kwargs)[0]
+
+        def get_video_encoder_configuration(self, ip, port, username, password, profile_token, **kwargs):
+            return {"bitrate": 4096000, "framerate": 30, "resolution": (1920, 1080)}
+
+        def set_video_encoder_configuration(self, ip, port, username, password, profile_token, bitrate, framerate, resolution, **kwargs):
+            self.set_tokens.append(profile_token)
+            return True
+
+    client = NoDiscoverClient()
+    cam_reg = CameraRegistry()
+    cam_reg.register("cam-001", "1.2.3.4", 80, "admin", "pass", "MyToken")
+    mapping = DeviceCameraMapping()
+    mapping.add_mapping("ctn1", "cam-001", 0.0)
+
+    qc = QualityController(client, cam_reg, mapping, degraded_ratio=0.25, step_up_ratio=0.50, max_retries=1)
+    results = qc.apply_profile("ctn1", QualityProfile.DEGRADED)
+
+    assert results[0].success
+    assert client.set_tokens == ["MyToken"]

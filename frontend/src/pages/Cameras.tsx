@@ -94,8 +94,8 @@ function CameraRegistry() {
   })
 
   const handleAdd = () => {
-    if (!form.cameraId || !form.ipAddress || !form.username || !form.password || !form.profileToken) {
-      setFormError('All fields are required.')
+    if (!form.cameraId || !form.ipAddress || !form.username || !form.password) {
+      setFormError('Camera ID, IP, Username, and Password are required.')
       return
     }
     setFormError('')
@@ -124,7 +124,7 @@ function CameraRegistry() {
             <Field label="ONVIF Port"  value={String(form.onvifPort)} type="number" onChange={(v) => setForm((f) => ({ ...f, onvifPort: Number(v) }))} />
             <Field label="Username"    value={form.username}      onChange={(v) => setForm((f) => ({ ...f, username: v }))} />
             <Field label="Password"    value={form.password}      type="password" onChange={(v) => setForm((f) => ({ ...f, password: v }))} />
-            <Field label="Profile Token" value={form.profileToken} onChange={(v) => setForm((f) => ({ ...f, profileToken: v }))} />
+            <Field label="Profile Token (blank = auto-detect)" value={form.profileToken} onChange={(v) => setForm((f) => ({ ...f, profileToken: v }))} />
             <Field label="Media Service Path (default: /onvif/media)"
                    value={form.mediaServicePath}
                    onChange={(v) => setForm((f) => ({ ...f, mediaServicePath: v }))} />
