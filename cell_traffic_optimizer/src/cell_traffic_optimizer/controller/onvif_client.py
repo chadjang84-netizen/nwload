@@ -228,9 +228,12 @@ class OnvifClient:
       <tt:Width>{width}</tt:Width>
       <tt:Height>{height}</tt:Height>
     </tt:Resolution>
-    <tt:FrameRateLimit>{framerate}</tt:FrameRateLimit>
-    <tt:EncodingInterval>1</tt:EncodingInterval>
-    <tt:BitrateLimit>{bitrate_kbps}</tt:BitrateLimit>
+    <tt:Quality>5</tt:Quality>
+    <tt:RateControl>
+      <tt:FrameRateLimit>{framerate}</tt:FrameRateLimit>
+      <tt:EncodingInterval>1</tt:EncodingInterval>
+      <tt:BitrateLimit>{bitrate_kbps}</tt:BitrateLimit>
+    </tt:RateControl>
 {codec_block}
     <tt:Multicast>
       <tt:Address>
