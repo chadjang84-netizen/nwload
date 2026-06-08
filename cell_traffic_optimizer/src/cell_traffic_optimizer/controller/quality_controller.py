@@ -316,6 +316,7 @@ class QualityController:
             ))
             return CommandResult(camera_id=camera_id, success=False, error=str(e))
 
+        last_error = "camera returned failure (no exception)"  # ok=False 케이스 기본 사유
         for attempt in range(1, self._max_retries + 1):
             try:
                 ok = self._client.set_video_encoder_configuration(
@@ -342,14 +343,17 @@ class QualityController:
                     ))
                     return CommandResult(camera_id=camera_id, success=True)
             except Exception as e:
+                last_error = str(e)
                 logger.warning("Camera %s attempt %d failed: %s", camera_id, attempt, e)
 
-        logger.error("Camera %s all %d retries failed", camera_id, self._max_retries)
+        # 마지막 시도의 실제 실패 사유를 보존해 UI 툴팁에 노출한다.
+        error_msg = f"Failed after {self._max_retries} retries: {last_error}"
+        logger.error("Camera %s all %d retries failed: %s", camera_id, self._max_retries, last_error)
         self._log(CommandLogEntry(
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
             camera_id=camera_id, router_ctn=ctn,
             command="SetVideoEncoderConfiguration", profile=profile_name,
             bitrate=bitrate, framerate=framerate, resolution=resolution,
-            success=False, error=f"Failed after {self._max_retries} retries",
+            success=False, error=error_msg,
         ))
-        return CommandResult(camera_id=camera_id, success=False, error=f"Failed after {self._max_retries} retries")
+        return CommandResult(camera_id=camera_id, success=False, error=error_msg)
