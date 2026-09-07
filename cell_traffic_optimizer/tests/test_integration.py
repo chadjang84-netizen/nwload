@@ -14,9 +14,20 @@ from cell_traffic_optimizer.models import QualityProfile, CellState, DeviceState
 # 10자 CTN — 15바이트 필드에 안전하게 들어감
 TEST_CTN = "0101234567"
 
+# NSA 테스트용 셀 식별자 — LTE/NR은 서로 다른 ECGI·Band로 별도 집계된다
+LTE_ECGI = 12345
+LTE_ARFCN = 1850     # → LTE Band 3
+NR_ECGI = 54321
+NR_ARFCN = 640000    # → NR Band 78
+
 SAMPLE_CONFIG = """
 thresholds:
   - band: 3
+    warning: 100
+    congestion: 200
+    overload_enter: 300
+    overload_exit: 250
+  - band: 78
     warning: 100
     congestion: 200
     overload_enter: 300
@@ -57,6 +68,21 @@ def _make_raw_packet(ctn: str = TEST_CTN, ul_rb_usage: int = 50, arfcn: int = 18
     ecgi_low = struct.pack(">I", 12345)
     primary = struct.pack(">B3sB4sIQH", 0x01, b"\x00\x10\x00", 0, ecgi_low, arfcn, 1700000000, ul_rb_usage)
     secondary = struct.pack(">B3sB4sIQH", 0x00, b"\x00\x00\x00", 0, b"\x00" * 4, 0, 0, 0)
+    header = struct.pack(">BBH15s", 0x01, 0x01, 67, ctn_raw)
+    return header + primary + secondary + b"\x00\x00"
+
+
+def _make_nsa_packet(ctn: str = TEST_CTN, lte_rb: int = 50, nr_rb: int = 50) -> bytes:
+    """NSA 단말 패킷 — Primary=LTE, Secondary=NR (서로 다른 ECGI/Band)."""
+    ctn_raw = ctn.encode("ascii").ljust(15, b"\x00")
+    primary = struct.pack(
+        ">B3sB4sIQH", 0x01, b"\x00\x10\x00", 0,
+        struct.pack(">I", LTE_ECGI), LTE_ARFCN, 1700000000, lte_rb,
+    )
+    secondary = struct.pack(
+        ">B3sB4sIQH", 0x02, b"\x00\x10\x00", 0,
+        struct.pack(">I", NR_ECGI), NR_ARFCN, 1700000000, nr_rb,
+    )
     header = struct.pack(">BBH15s", 0x01, 0x01, 67, ctn_raw)
     return header + primary + secondary + b"\x00\x00"
 
@@ -175,6 +201,91 @@ def test_pipeline_recovery_timer():
     actions = pipeline.check_recovery_timers(T + 1200 + 61)
     assert len(actions) > 0
     assert actions[0].success
+
+
+# ── NSA 단말: 발동은 OR, 복구는 AND ────────────────────────────────────────────
+
+@pytest.mark.parametrize("insert_nr_first", [False, True])
+def test_is_device_cell_normal_requires_all_serving_cells(insert_nr_first):
+    """소속 셀 중 하나라도 부하면 복구 불가 — _ctn_map 등록 순서와 무관해야 한다."""
+    from cell_traffic_optimizer.models import GroupingKey
+
+    pipeline = _build_pipeline(MockONVIFClient())
+    lte_key = GroupingKey(ecgi=LTE_ECGI, band=3)
+    nr_key = GroupingKey(ecgi=NR_ECGI, band=78)
+
+    for key in ([nr_key, lte_key] if insert_nr_first else [lte_key, nr_key]):
+        pipeline._cell_sm.ensure_registered(key)
+        pipeline._cell_sm.update_ctns(key, {TEST_CTN})
+
+    assert pipeline._is_device_cell_normal(TEST_CTN)          # 둘 다 NORMAL
+
+    pipeline._cell_sm._states[nr_key] = CellState.OVERLOAD
+    assert not pipeline._is_device_cell_normal(TEST_CTN)      # NR만 부하
+
+    pipeline._cell_sm._states[nr_key] = CellState.NORMAL
+    pipeline._cell_sm._states[lte_key] = CellState.OVERLOAD
+    assert not pipeline._is_device_cell_normal(TEST_CTN)      # LTE만 부하
+
+    # 소속 셀 기록이 없으면(윈도우 만료) 부하 근거가 없으므로 NORMAL로 본다
+    assert pipeline._is_device_cell_normal("0109999999")
+
+
+def test_nsa_recovery_waits_for_both_rats():
+    """NSA 단말은 LTE·NR 두 셀이 모두 NORMAL이 될 때까지 복구를 시작하지 않는다."""
+    mock = MockONVIFClient()
+    pipeline = _build_pipeline(mock)
+    T = 1000.0
+
+    # 프라이머 — 각 키의 윈도우 타이머를 등록한다(첫 이벤트는 첫 만료 시 evict됨)
+    pipeline.process_packet(_make_nsa_packet(lte_rb=1, nr_rb=1), T)
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=101, nr_rb=101), T + 100)
+    pipeline.check_window_expiry(T + 300)     # 두 셀 WARNING
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=201, nr_rb=201), T + 400)
+    pipeline.check_window_expiry(T + 600)     # 두 셀 CONGESTION
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=301, nr_rb=301), T + 700)
+    pipeline.check_window_expiry(T + 900)     # 두 셀 OVERLOAD → 단말 DEGRADED
+    assert pipeline._device_sm._get_state(TEST_CTN) == DeviceState.DEGRADED
+
+    # LTE만 부하 해제 — NR은 여전히 OVERLOAD이므로 복구 금지
+    pipeline.process_packet(_make_nsa_packet(lte_rb=10, nr_rb=301), T + 1000)
+    result = pipeline.check_window_expiry(T + 1200)
+    assert any(t.new_state == CellState.NORMAL for t in result.cell_transitions)
+    assert pipeline._device_sm._get_state(TEST_CTN) == DeviceState.DEGRADED
+    assert pipeline.check_orphan_degraded(T + 1200) == []     # 주기 점검도 풀어주지 않아야 함
+
+    # NR까지 해제 — 이제 복구 진입
+    pipeline.process_packet(_make_nsa_packet(lte_rb=10, nr_rb=10), T + 1300)
+    pipeline.check_window_expiry(T + 1500)
+    assert pipeline._device_sm._get_state(TEST_CTN) == DeviceState.RECOVERY_PENDING
+
+
+def test_nsa_degrade_is_or_condition():
+    """NR 셀만 부하 조건이어도(LTE는 NORMAL) 단말은 DEGRADED로 내려간다."""
+    mock = MockONVIFClient()
+    pipeline = _build_pipeline(mock)
+    T = 1000.0
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=1, nr_rb=1), T)
+
+    # LTE는 계속 NORMAL 수준(10), NR만 임계값을 밟아 올라간다
+    pipeline.process_packet(_make_nsa_packet(lte_rb=10, nr_rb=101), T + 100)
+    pipeline.check_window_expiry(T + 300)
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=10, nr_rb=201), T + 400)
+    pipeline.check_window_expiry(T + 600)
+
+    pipeline.process_packet(_make_nsa_packet(lte_rb=10, nr_rb=301), T + 700)
+    result = pipeline.check_window_expiry(T + 900)
+
+    from cell_traffic_optimizer.models import GroupingKey
+    assert pipeline._cell_sm.get_state(GroupingKey(ecgi=LTE_ECGI, band=3)) == CellState.NORMAL
+    assert pipeline._cell_sm.get_state(GroupingKey(ecgi=NR_ECGI, band=78)) == CellState.OVERLOAD
+    assert pipeline._device_sm._get_state(TEST_CTN) == DeviceState.DEGRADED
+    assert len(result.quality_commands) > 0
 
 
 def test_data_layer_device_registry():

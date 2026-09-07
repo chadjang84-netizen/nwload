@@ -136,6 +136,14 @@ class DataPipeline:
         if new_state == CellState.NORMAL:
             current_ctns = list(self._cell_sm._ctn_map.get(key, set()))
             for ctn in current_ctns:
+                # NSA 단말은 다른 RAT 셀이 아직 부하일 수 있다 — 소속 셀 전체가
+                # NORMAL일 때만 복구를 시작한다. 여기서 걸러진 단말은 다른 셀이
+                # 풀리는 시점 또는 check_orphan_degraded() 주기 점검에서 처리된다.
+                if not self._is_device_cell_normal(ctn):
+                    logger.debug(
+                        "Skip recovery for %s — another serving cell is still loaded", ctn
+                    )
+                    continue
                 state = self._device_sm._get_state(ctn)
                 if state == DeviceState.DEGRADED:
                     action = self._device_sm.start_recovery(ctn, timestamp)
@@ -168,22 +176,31 @@ class DataPipeline:
         return result
 
     def check_orphan_degraded(self, now: float) -> list:
-        """현재 속한 셀이 NORMAL인 DEGRADED 단말을 회복 흐름으로 진입시킨다.
+        """소속 셀이 모두 NORMAL인데 아직 DEGRADED/UNMANAGED로 남은 단말을 정리한다.
 
         핸드오버로 단말이 OVERLOAD 셀에서 NORMAL 셀로 이동한 경우, 이전 셀의
         transition 시점에는 이미 ctn_map에서 빠져있어 start_recovery가
-        호출되지 않는다. 이 메서드가 주기적으로 그 누락분을 보완한다.
+        호출되지 않는다. NSA 단말처럼 여러 셀에 걸친 경우, 나중에 부하가 풀린
+        셀이 transition 없이 윈도우 만료(expire)로 사라지면 복구 트리거가
+        아예 발생하지 않는다. 이 메서드가 주기적으로 그 누락분을 보완한다.
         """
         actions = []
         for ctn in list(self._device_sm._states.keys()):
-            if self._device_sm._get_state(ctn) != DeviceState.DEGRADED:
+            state = self._device_sm._get_state(ctn)
+            if state not in (DeviceState.DEGRADED, DeviceState.UNMANAGED):
                 continue
             if not self._is_device_cell_normal(ctn):
                 continue
-            action = self._device_sm.start_recovery(ctn, now)
+            if state == DeviceState.DEGRADED:
+                action = self._device_sm.start_recovery(ctn, now)
+            else:
+                action = self._device_sm.clear_unmanaged(ctn, now)
             if action.success:
                 actions.append(action)
-                logger.info("Orphan DEGRADED %s entered RECOVERY_PENDING (cell is NORMAL)", ctn)
+                logger.info(
+                    "Orphan %s %s -> %s (all serving cells NORMAL)",
+                    ctn, state.value, action.new_state.value,
+                )
         return actions
 
     def check_recovery_timers(self, now: float) -> list:
@@ -219,9 +236,25 @@ class DataPipeline:
         return actions
 
     def _is_device_cell_normal(self, ctn: str) -> bool:
-        # Check all known grouping keys for cells that contain this ctn
-        for key, ctn_set in self._cell_sm._ctn_map.items():
-            if ctn in ctn_set:
-                return self._cell_sm.get_state(key) == CellState.NORMAL
-        # If no cell record found, assume normal
-        return True
+        """단말이 속한 **모든** 셀이 NORMAL일 때만 True (AND 조건).
+
+        NSA 단말은 LTE/NR 두 셀에 동시에 속하고, 각 RAT은 별도 grouping_key
+        (ECGI/Band)로 독립 집계·판정된다. 한쪽 RAT이 아직 OVERLOAD인데 다른
+        한쪽만 보고 복구하면 부하 셀에 다시 고화질 UL 트래픽을 올리게 되므로,
+        소속 셀 전체가 NORMAL이어야 복구를 허용한다.
+
+        (기존 구현은 dict 순회에서 첫 번째로 걸린 셀만 보고 즉시 반환해,
+        판정 결과가 _ctn_map의 RAT 등록 순서에 좌우됐다.)
+
+        슬라이딩 윈도우가 만료된 셀은 CellStateMachine.expire()가 _ctn_map에서
+        제거하므로 판정 대상에서 자연히 빠진다.
+        """
+        states = [
+            self._cell_sm.get_state(key)
+            for key, ctn_set in self._cell_sm._ctn_map.items()
+            if ctn in ctn_set
+        ]
+        if not states:
+            # 소속 셀 기록이 없으면(윈도우 만료 등) 부하 근거가 없으므로 NORMAL로 본다
+            return True
+        return all(s == CellState.NORMAL for s in states)
